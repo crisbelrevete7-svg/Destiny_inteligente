@@ -27,6 +27,22 @@ const TOOLS = [
   fn('generar_pdf', 'Genera y descarga un PDF con la agenda del usuario.', {
     contenido: { type: 'string', enum: ['todo', 'eventos', 'tareas', 'notas'], description: 'Qué incluir; por defecto todo' },
   }, []),
+  fn('editar_elemento', 'Cambia título, fecha, hora o texto de un evento, tarea, nota o recordatorio que ya existe.', {
+    tipo: { type: 'string', enum: ['evento', 'tarea', 'nota', 'recordatorio'] },
+    buscar: { type: 'string', description: 'Parte del título actual' },
+    nuevo_titulo: { type: 'string' },
+    fecha: { type: 'string', description: 'YYYY-MM-DD' },
+    hora: { type: 'string', description: 'HH:MM en 24 h' },
+    texto: { type: 'string', description: 'Nuevo contenido, solo para notas' },
+  }, ['tipo', 'buscar']),
+  fn('completar_tarea', 'Marca una tarea como hecha (o como pendiente con hecha=false).', {
+    buscar: { type: 'string', description: 'Parte del título de la tarea' },
+    hecha: { type: 'boolean' },
+  }, ['buscar']),
+  fn('borrar_elemento', 'Borra un evento, tarea, nota o recordatorio.', {
+    tipo: { type: 'string', enum: ['evento', 'tarea', 'nota', 'recordatorio'] },
+    buscar: { type: 'string', description: 'Parte del título' },
+  }, ['tipo', 'buscar']),
   fn('ver_agenda', 'Devuelve todos los eventos, tareas y notas guardados.', {}, []),
 ];
 
@@ -51,7 +67,7 @@ module.exports = async (req, res) => {
       'Eres Destiny, asistente personal. Responde en español, breve y cálido. ' +
       'Para agendar eventos, crear tareas o notas, usa siempre las herramientas; no finjas haberlo hecho. ' +
       'Convierte fechas relativas ("mañana", "el viernes") a YYYY-MM-DD usando la fecha actual del usuario: ' + ahora + '. ' +
-      'Si piden un PDF, usa generar_pdf. Si piden que les recuerdes algo, usa crear_recordatorio y pregunta la hora si no la dieron. ' +
+      'Para cambiar, completar o borrar usa editar_elemento, completar_tarea o borrar_elemento con parte del título; si hay varios parecidos, pregunta cuál. Si piden un PDF, usa generar_pdf. Si piden que les recuerdes algo, usa crear_recordatorio y pregunta la hora si no la dieron. ' +
       'Si falta un dato imprescindible (por ejemplo, el día), pregúntalo en una sola frase.',
   };
 

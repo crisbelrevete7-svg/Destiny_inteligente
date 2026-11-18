@@ -99,6 +99,22 @@ const tools = {
   crear_tarea: a => { const id = uid(); db.tareas.push({ id, titulo: a.titulo, fecha: a.fecha_limite || '', hecha: false }); quiet('t' + id); return 'Tarea creada'; },
   crear_nota: a => { db.notas.push({ id: uid(), titulo: a.titulo, texto: a.texto || '' }); return 'Nota creada'; },
   crear_recordatorio: a => { const id = uid(); db.recordatorios.push({ id, texto: a.texto, fecha: a.fecha, hora: a.hora || '' }); quiet('r' + id); return 'Recordatorio creado'; },
+  editar_elemento: a => {
+    const f = buscarItem(a.tipo, a.buscar); if (f.err) return f.err; const it = f.it;
+    if (a.nuevo_titulo) { if (f.key === 'recordatorios') it.texto = a.nuevo_titulo; else it.titulo = a.nuevo_titulo; }
+    if (a.fecha && f.key !== 'notas') it.fecha = a.fecha;
+    if (a.hora != null && (f.key === 'eventos' || f.key === 'recordatorios')) it.hora = a.hora;
+    if (a.texto != null && f.key === 'notas') it.texto = a.texto;
+    rearmar(f.key, it); return 'Actualizado';
+  },
+  completar_tarea: a => {
+    const f = buscarItem('tarea', a.buscar); if (f.err) return f.err;
+    f.it.hecha = a.hecha !== false; return f.it.hecha ? 'Tarea marcada como hecha' : 'Tarea marcada como pendiente';
+  },
+  borrar_elemento: a => {
+    const f = buscarItem(a.tipo, a.buscar); if (f.err) return f.err;
+    db[f.key] = db[f.key].filter(o => o !== f.it); db.avisados = db.avisados.filter(k => k !== PREF[f.key] + f.it.id); return 'Borrado';
+  },
   ver_agenda: () => JSON.stringify({ eventos: db.eventos, tareas: db.tareas, notas: db.notas, recordatorios: db.recordatorios }),
   generar_pdf: a => makePDF(a.contenido || 'todo'),
 };
@@ -348,6 +364,23 @@ function cuando(txt) {
   const resto = t.replace(/\s+/g, ' ').trim().replace(/\s+(?:para|el|a las?|de|en|este)$/i, '').replace(/\s+(?:para|el|a las?|de|en|este)$/i, '');
   return { fecha, hora, resto };
 }
+const KINDS = { evento: 'eventos', cita: 'eventos', tarea: 'tareas', nota: 'notas', recordatorio: 'recordatorios' };
+const PREF = { eventos: 'e', tareas: 't', recordatorios: 'r' };
+function buscarItem(tipo, q) {
+  const key = KINDS[norm(tipo || '')], nq = norm(q || '').trim();
+  if (!key) return { err: 'Tipo no válido: usa evento, tarea, nota o recordatorio' };
+  if (!nq) return { err: 'Falta indicar cuál' };
+  const name = it => norm(it.titulo || it.texto || '');
+  let hits = db[key].filter(it => name(it) === nq);
+  if (!hits.length) hits = db[key].filter(it => name(it) && (name(it).includes(nq) || nq.includes(name(it))));
+  if (!hits.length) return { err: 'No encontré ' + tipo + ' con "' + q + '"' };
+  if (hits.length > 1) return { err: 'Hay varios parecidos: ' + hits.map(it => it.titulo || it.texto).join('; ') + '. Pide más detalle.' };
+  return { key, it: hits[0] };
+}
+function rearmar(key, it) { // si cambió la fecha u hora, el aviso vuelve a quedar pendiente
+  if (!PREF[key]) return;
+  db.avisados = db.avisados.filter(k => k !== PREF[key] + it.id); quiet(PREF[key] + it.id);
+}
 function resumen() {
   const h = iso(new Date());
   const ev = db.eventos.filter(e => e.fecha >= h).sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora)).slice(0, 5);
@@ -363,8 +396,14 @@ function runLocal(text) {
   if ((m = /^(?:nueva )?(?:tarea|pendiente)[:,]?\s+(.+)/.exec(n))) { const c = cuando(rest(m)); tools.crear_tarea({ titulo: c.resto || rest(m), fecha_limite: c.fecha }); return done('Tarea creada.'); }
   if ((m = /^recuerdame\s+(.+)/.exec(n))) { const c = cuando(rest(m)); tools.crear_recordatorio({ texto: c.resto || rest(m), fecha: c.fecha || iso(new Date()), hora: c.hora }); return done('Listo, te lo recordaré' + (c.hora ? '.' : ' a las 09:00.')); }
   if ((m = /^(?:agenda|agendame|evento|cita)\s+(.+)/.exec(n))) { const c = cuando(rest(m)); if (!c.fecha) return 'Dime el día, por ejemplo: "agenda dentista mañana a las 4".'; tools.crear_evento({ titulo: c.resto || rest(m), fecha: c.fecha, hora: c.hora }); return done('Evento agendado.'); }
+  if ((m = /^(?:borra|borrar|elimina|eliminar|quita)\s+(?:el |la )?(tarea|evento|cita|nota|recordatorio)\s+(.+)/.exec(n))) return done(tools.borrar_elemento({ tipo: m[1], buscar: m[2] }));
+  if ((m = /^(?:completa|completar|termina|marca)\s+(?:como hecha\s+)?(?:la\s+)?(?:tarea\s+)?(.+)/.exec(n))) return done(tools.completar_tarea({ buscar: m[1] }));
+  if ((m = /^(?:cambia|cambiar|mueve|mover|pasa)\s+(?:el |la )?(evento|cita|tarea|recordatorio)\s+(.+?)\s+(?:para|al|a)\s+(?:el\s+)?(.+)/.exec(n))) {
+    const c = cuando(m[3]); if (!c.fecha && !c.hora) return 'No entendí la nueva fecha. Ejemplo: "mueve la cita dentista al sábado a las 5".';
+    return done(tools.editar_elemento({ tipo: m[1], buscar: m[2], fecha: c.fecha || undefined, hora: c.hora || undefined }));
+  }
   if (/(que tengo|mi agenda|pendientes|resumen)/.test(n)) return resumen();
-  return 'Sin conexión solo entiendo comandos como: "nota: …", "tarea: … el viernes", "recuérdame … mañana a las 9", "agenda … el lunes a las 3", "qué tengo" o "pdf".';
+  return 'Sin conexión solo entiendo comandos como: "nota: …", "tarea: … el viernes", "recuérdame … mañana a las 9", "agenda … el lunes a las 3", "mueve la cita … al sábado", "borra la nota …", "completa la tarea …", "qué tengo" o "pdf".';
 }
 const net = $('#net'), upd = () => { net.hidden = navigator.onLine; };
 addEventListener('online', upd); addEventListener('offline', upd); upd();
