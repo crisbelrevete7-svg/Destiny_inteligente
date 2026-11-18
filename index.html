@@ -80,6 +80,7 @@ header h1{margin:0;flex:1}
   <button data-v="chat" aria-pressed="true">Chat</button>
   <button data-v="panel" aria-pressed="false">Agenda</button>
 </nav>
+<script src="jspdf.umd.min.js"></script>
 <script>
 const KEY = 'destiny-data';
 const blank = () => ({ eventos: [], tareas: [], notas: [] });
@@ -93,6 +94,7 @@ const tools = {
   crear_tarea: a => { db.tareas.push({ id: uid(), titulo: a.titulo, fecha: a.fecha_limite || '', hecha: false }); return 'Tarea creada'; },
   crear_nota: a => { db.notas.push({ id: uid(), titulo: a.titulo, texto: a.texto || '' }); return 'Nota creada'; },
   ver_agenda: () => JSON.stringify(db),
+  generar_pdf: a => makePDF(a.contenido || 'todo'),
 };
 
 const $ = s => document.querySelector(s);
@@ -126,10 +128,69 @@ function section(title, key, items, line) {
 
 function render() {
   panel.replaceChildren();
+  const pb = el('button', 'tg', 'Descargar PDF');
+  pb.onclick = () => { try { makePDF('todo'); } catch (e) { alert(e.message); } };
+  panel.append(pb);
   const byDate = (a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora);
   section('Eventos', 'eventos', [...db.eventos].sort(byDate), e => e.fecha + (e.hora ? ' · ' + e.hora : ''));
   section('Tareas', 'tareas', db.tareas, t => t.fecha ? 'Para el ' + t.fecha : '');
   section('Notas', 'notas', db.notas, n => n.texto);
+}
+
+
+// ---- PDF ----
+function makePDF(what = 'todo') {
+  if (!window.jspdf) throw new Error('No cargó la librería de PDF (jspdf.umd.min.js)');
+  const doc = new window.jspdf.jsPDF({ unit: 'pt', format: 'a4' });
+  const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), M = 48;
+  const clean = t => String(t == null ? '' : t).replace(/[^\x20-\x7E\u00A0-\u00FF]/g, '');
+  let y;
+  const header = () => {
+    doc.setFillColor(46, 26, 71); doc.rect(0, 0, W, 86, 'F');
+    doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(26); doc.text('Destiny', M, 52);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(11); doc.setTextColor(228, 217, 248);
+    doc.text(clean(new Date().toLocaleDateString('es', { dateStyle: 'full' })), W - M, 52, { align: 'right' });
+    y = 124;
+  };
+  const room = n => { if (y + n > H - M) { doc.addPage(); header(); } };
+  const section = (title, rgb, rows) => {
+    room(70);
+    doc.setFillColor(...rgb); doc.roundedRect(M, y - 14, 6, 20, 3, 3, 'F');
+    doc.setTextColor(46, 26, 71); doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.text(title, M + 16, y + 2);
+    y += 28;
+    if (!rows.length) {
+      doc.setFont('helvetica', 'italic'); doc.setFontSize(11); doc.setTextColor(120, 105, 150);
+      doc.text('Nada por ahora.', M + 16, y); y += 30; return;
+    }
+    rows.forEach(([chip, text, sub]) => {
+      const main = doc.splitTextToSize(clean(text), W - 2 * M - 130);
+      const subL = sub ? doc.splitTextToSize(clean(sub), W - 2 * M - 130) : [];
+      const h = main.length * 15 + subL.length * 13 + 14;
+      room(h + 6);
+      doc.setFillColor(245, 241, 252); doc.roundedRect(M, y - 12, W - 2 * M, h, 6, 6, 'F');
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...rgb); doc.text(clean(chip), M + 12, y + 2);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(12); doc.setTextColor(30, 21, 48); doc.text(main, M + 130, y + 2);
+      if (subL.length) { doc.setFontSize(10); doc.setTextColor(107, 93, 133); doc.text(subL, M + 130, y + 2 + main.length * 15); }
+      y += h + 6;
+    });
+    y += 12;
+  };
+  header();
+  const all = what === 'todo';
+  if (all || what === 'eventos') section('Eventos', [123, 79, 214],
+    [...db.eventos].sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora))
+      .map(e => [e.fecha + (e.hora ? '  ' + e.hora : ''), e.titulo]));
+  if (all || what === 'tareas') section('Tareas', [176, 70, 160],
+    db.tareas.map(t => [t.hecha ? 'Hecha' : (t.fecha || 'Pendiente'), t.titulo]));
+  if (all || what === 'notas') section('Notas', [80, 100, 200],
+    db.notas.map(n => ['Nota', n.titulo, n.texto]));
+  const n = doc.getNumberOfPages();
+  for (let i = 1; i <= n; i++) {
+    doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(150, 135, 180);
+    doc.text(i + ' / ' + n, W / 2, H - 24, { align: 'center' });
+  }
+  doc.save('destiny-' + what + '-' + new Date().toISOString().slice(0, 10) + '.pdf');
+  return 'PDF generado y descargado';
 }
 
 const hist = [];

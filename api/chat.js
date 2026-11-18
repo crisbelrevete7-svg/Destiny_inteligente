@@ -18,6 +18,9 @@ const TOOLS = [
     titulo: { type: 'string' },
     texto: { type: 'string' },
   }, ['titulo']),
+  fn('generar_pdf', 'Genera y descarga un PDF con la agenda del usuario.', {
+    contenido: { type: 'string', enum: ['todo', 'eventos', 'tareas', 'notas'], description: 'Qué incluir; por defecto todo' },
+  }, []),
   fn('ver_agenda', 'Devuelve todos los eventos, tareas y notas guardados.', {}, []),
 ];
 
@@ -35,6 +38,7 @@ module.exports = async (req, res) => {
       'Eres Destiny, asistente personal. Responde en español, breve y cálido. ' +
       'Para agendar eventos, crear tareas o notas, usa siempre las herramientas; no finjas haberlo hecho. ' +
       'Convierte fechas relativas ("mañana", "el viernes") a YYYY-MM-DD usando la fecha actual del usuario: ' + ahora + '. ' +
+      'Si piden un PDF, usa generar_pdf. ' +
       'Si falta un dato imprescindible (por ejemplo, el día), pregúntalo en una sola frase.',
   };
 
