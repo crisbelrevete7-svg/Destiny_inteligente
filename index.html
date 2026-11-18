@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#2e1a47">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <title>Destiny</title>
 <style>
 :root{--bg:#f5f1fc;--card:#fff;--ink:#1e1530;--mute:#6b5d85;--violet:#7b4fd6;--on:#fff;--lav:#e4d9f8;--line:#d9cdef}
@@ -66,6 +69,7 @@ header h1{margin:0;flex:1}
   <header>
     <div class="orb" id="orb" data-st="idle" role="img" aria-label="Avatar de Destiny"></div>
     <h1>Destiny</h1>
+    <span class="tg" id="net" hidden>Sin conexión</span>
     <button type="button" class="tg" id="vz" aria-pressed="true">Voz activada</button>
   </header>
   <div id="log" aria-live="polite"></div>
@@ -84,17 +88,18 @@ header h1{margin:0;flex:1}
 <script>window.jspdf||document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"><\/script>')</script>
 <script>
 const KEY = 'destiny-data';
-const blank = () => ({ eventos: [], tareas: [], notas: [] });
+const blank = () => ({ eventos: [], tareas: [], notas: [], recordatorios: [], avisados: [] });
 let db;
-try { db = JSON.parse(localStorage.getItem(KEY)) || blank(); } catch { db = blank(); }
+try { db = Object.assign(blank(), JSON.parse(localStorage.getItem(KEY)) || {}); } catch { db = blank(); }
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch {} };
 const uid = () => Math.random().toString(36).slice(2, 9);
 
 const tools = {
-  crear_evento: a => { db.eventos.push({ id: uid(), titulo: a.titulo, fecha: a.fecha, hora: a.hora || '' }); return 'Evento creado'; },
-  crear_tarea: a => { db.tareas.push({ id: uid(), titulo: a.titulo, fecha: a.fecha_limite || '', hecha: false }); return 'Tarea creada'; },
+  crear_evento: a => { const id = uid(); db.eventos.push({ id, titulo: a.titulo, fecha: a.fecha, hora: a.hora || '', antes: a.avisar_minutos_antes }); quiet('e' + id); return 'Evento creado'; },
+  crear_tarea: a => { const id = uid(); db.tareas.push({ id, titulo: a.titulo, fecha: a.fecha_limite || '', hecha: false }); quiet('t' + id); return 'Tarea creada'; },
   crear_nota: a => { db.notas.push({ id: uid(), titulo: a.titulo, texto: a.texto || '' }); return 'Nota creada'; },
-  ver_agenda: () => JSON.stringify(db),
+  crear_recordatorio: a => { const id = uid(); db.recordatorios.push({ id, texto: a.texto, fecha: a.fecha, hora: a.hora || '' }); quiet('r' + id); return 'Recordatorio creado'; },
+  ver_agenda: () => JSON.stringify({ eventos: db.eventos, tareas: db.tareas, notas: db.notas, recordatorios: db.recordatorios }),
   generar_pdf: a => makePDF(a.contenido || 'todo'),
 };
 
@@ -131,10 +136,13 @@ function render() {
   panel.replaceChildren();
   const pb = el('button', 'tg', 'Descargar PDF');
   pb.onclick = () => { try { makePDF('todo'); } catch (e) { alert(e.message); } };
-  panel.append(pb);
+  const bell = el('button', 'tg', !('Notification' in window) ? 'Avisos no disponibles' : Notification.permission === 'granted' ? 'Avisos activados' : 'Activar avisos');
+  bell.onclick = () => { if ('Notification' in window) Notification.requestPermission().then(render); };
+  const row = el('div'); row.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap'; row.append(pb, bell); panel.append(row);
   const byDate = (a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora);
   section('Eventos', 'eventos', [...db.eventos].sort(byDate), e => e.fecha + (e.hora ? ' · ' + e.hora : ''));
   section('Tareas', 'tareas', db.tareas, t => t.fecha ? 'Para el ' + t.fecha : '');
+  section('Recordatorios', 'recordatorios', [...db.recordatorios].sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora)).map(r => ({ ...r, titulo: r.texto })), r => r.fecha + (r.hora ? ' · ' + r.hora : ''));
   section('Notas', 'notas', db.notas, n => n.texto);
 }
 
@@ -227,7 +235,12 @@ $('#f').onsubmit = async ev => {
   if (voiceOn && 'speechSynthesis' in window) { speechSynthesis.cancel(); speechSynthesis.speak(new SpeechSynthesisUtterance('')); }
   bubble(text, 'u'); hist.push({ role: 'user', content: text });
   const wait = bubble('Pensando…', 'a');
-  try { wait.textContent = (await ask()) || 'Hecho.'; speak(wait.textContent); }
+  try {
+    let out;
+    if (!navigator.onLine) out = runLocal(text);
+    else { try { out = await ask(); } catch (e) { if (e instanceof TypeError) out = runLocal(text); else throw e; } }
+    wait.textContent = out || 'Hecho.'; speak(wait.textContent);
+  }
   catch (e) { wait.textContent = 'No pude responder: ' + e.message; wait.classList.add('err'); }
   $('#s').disabled = false; q.focus(); log.scrollTop = log.scrollHeight;
 };
@@ -278,6 +291,85 @@ if (!SR) { mic.hidden = true; } else {
   rec.onresult = e => { $('#q').value = e.results[0][0].transcript; $('#f').requestSubmit(); };
   mic.onclick = () => { if (on) return rec.stop(); if (hasTTS) speechSynthesis.cancel(); rec.start(); };
 }
+
+// ---- Avisos y modo sin conexión ----
+const pad = n => String(n).padStart(2, '0');
+const iso = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+const norm = t => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const DIAS = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+function agenda() {
+  const out = [], T = (f, h) => new Date(f + 'T' + (h || '09:00') + ':00');
+  db.eventos.forEach(e => { const t = T(e.fecha, e.hora); if (isNaN(t)) return; const antes = e.hora ? (e.antes == null ? 15 : e.antes) : 0;
+    out.push({ key: 'e' + e.id, when: t - antes * 60000, title: e.titulo, body: e.hora ? (antes ? 'En ' + antes + ' min (' + e.hora + ')' : 'Ahora (' + e.hora + ')') : 'Es hoy' }); });
+  db.tareas.forEach(t => { if (!t.fecha || t.hecha) return; const d = T(t.fecha); if (!isNaN(d)) out.push({ key: 't' + t.id, when: +d, title: t.titulo, body: 'Tarea para hoy' }); });
+  db.recordatorios.forEach(r => { const d = T(r.fecha, r.hora); if (!isNaN(d)) out.push({ key: 'r' + r.id, when: +d, title: r.texto, body: 'Recordatorio' }); });
+  return out;
+}
+function quiet(key) { // lo que ya pasó al crearlo no debe sonar de golpe
+  const x = agenda().find(a => a.key === key);
+  if (x && x.when <= Date.now() && !db.avisados.includes(key)) db.avisados.push(key);
+}
+async function notify(a) {
+  bubble('🔔 ' + a.title + ' (' + a.body + ')', 'a');
+  if (voiceOn && document.visibilityState === 'visible') speak('Recordatorio: ' + a.title);
+  if ('Notification' in window && Notification.permission === 'granted') {
+    const o = { body: a.body, icon: 'icon-192.png', tag: a.key };
+    try { const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration(); if (reg) reg.showNotification(a.title, o); else new Notification(a.title, o); } catch {}
+  }
+}
+function check() {
+  const now = Date.now(); let ch = false;
+  agenda().forEach(a => { if (a.when <= now && now - a.when < 864e5 && !db.avisados.includes(a.key)) { db.avisados.push(a.key); ch = true; notify(a); } });
+  if (ch) { db.avisados = db.avisados.slice(-200); save(); }
+}
+setInterval(check, 20000);
+document.addEventListener('visibilitychange', check);
+setTimeout(check, 1500);
+
+function cuando(txt) {
+  let t = ' ' + txt + ' ', fecha = '', hora = '', now = new Date();
+  const take = re => { const m = re.exec(norm(t)); if (m) t = t.slice(0, m.index) + ' ' + t.slice(m.index + m[0].length); return m; };
+  const add = n => { const d = new Date(now); d.setDate(d.getDate() + n); return iso(d); };
+  let m;
+  if ((m = take(/(\d{4})-(\d{2})-(\d{2})/))) fecha = m[0];
+  else if (take(/\bpasado manana\b/)) fecha = add(2);
+  else if (take(/\bmanana\b/)) fecha = add(1);
+  else if (take(/\bhoy\b/)) fecha = add(0);
+  else if ((m = take(new RegExp('\\b(?:el )?(\\d{1,2}) de (' + MESES.join('|') + ')\\b')))) {
+    let d = new Date(now.getFullYear(), MESES.indexOf(m[2]), +m[1]); if (d < new Date(iso(now) + 'T00:00:00')) d.setFullYear(d.getFullYear() + 1); fecha = iso(d);
+  } else if ((m = take(new RegExp('\\b(?:el |este |proximo )?(' + DIAS.join('|') + ')\\b')))) fecha = add((DIAS.indexOf(m[1]) - now.getDay() + 7) % 7 || 7);
+  if ((m = take(/(?:\ba las? (\d{1,2})(?::(\d{2}))?|\b(\d{1,2}):(\d{2})|\b(\d{1,2})(?=\s*(?:am|pm)\b))\s*(am|pm|de la manana|de la tarde|de la noche)?/))) {
+    let h = +(m[1] || m[3] || m[5]); const mi = m[2] || m[4] || '00', suf = m[6] || '';
+    if (/pm|tarde|noche/.test(suf) && h < 12) h += 12; else if (/am|manana/.test(suf) && h === 12) h = 0; else if (!suf && h >= 1 && h <= 7) h += 12;
+    if (h < 24) hora = pad(h) + ':' + mi;
+  }
+  const resto = t.replace(/\s+/g, ' ').trim().replace(/\s+(?:para|el|a las?|de|en|este)$/i, '').replace(/\s+(?:para|el|a las?|de|en|este)$/i, '');
+  return { fecha, hora, resto };
+}
+function resumen() {
+  const h = iso(new Date());
+  const ev = db.eventos.filter(e => e.fecha >= h).sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora)).slice(0, 5);
+  const ta = db.tareas.filter(t => !t.hecha);
+  return (ev.length ? 'Próximos eventos: ' + ev.map(e => e.titulo + ' (' + e.fecha + (e.hora ? ' ' + e.hora : '') + ')').join(', ') + '. ' : 'No tienes eventos próximos. ')
+    + (ta.length ? 'Tareas pendientes: ' + ta.map(t => t.titulo).join(', ') + '.' : 'No tienes tareas pendientes.');
+}
+function runLocal(text) {
+  const raw = text.trim(), n = norm(raw); let m;
+  const rest = mm => raw.slice(raw.length - mm[1].length), done = msg => { save(); render(); return msg; };
+  if (/\bpdf\b/.test(n)) return makePDF('todo');
+  if ((m = /^(?:nueva )?nota[:,]?\s+(.+)/.exec(n))) { const t = rest(m); tools.crear_nota({ titulo: t.slice(0, 60), texto: t.length > 60 ? t : '' }); return done('Nota guardada.'); }
+  if ((m = /^(?:nueva )?(?:tarea|pendiente)[:,]?\s+(.+)/.exec(n))) { const c = cuando(rest(m)); tools.crear_tarea({ titulo: c.resto || rest(m), fecha_limite: c.fecha }); return done('Tarea creada.'); }
+  if ((m = /^recuerdame\s+(.+)/.exec(n))) { const c = cuando(rest(m)); tools.crear_recordatorio({ texto: c.resto || rest(m), fecha: c.fecha || iso(new Date()), hora: c.hora }); return done('Listo, te lo recordaré' + (c.hora ? '.' : ' a las 09:00.')); }
+  if ((m = /^(?:agenda|agendame|evento|cita)\s+(.+)/.exec(n))) { const c = cuando(rest(m)); if (!c.fecha) return 'Dime el día, por ejemplo: "agenda dentista mañana a las 4".'; tools.crear_evento({ titulo: c.resto || rest(m), fecha: c.fecha, hora: c.hora }); return done('Evento agendado.'); }
+  if (/(que tengo|mi agenda|pendientes|resumen)/.test(n)) return resumen();
+  return 'Sin conexión solo entiendo comandos como: "nota: …", "tarea: … el viernes", "recuérdame … mañana a las 9", "agenda … el lunes a las 3", "qué tengo" o "pdf".';
+}
+const net = $('#net'), upd = () => { net.hidden = navigator.onLine; };
+addEventListener('online', upd); addEventListener('offline', upd); upd();
+if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+// ---- fin avisos ----
 
 log.append(el('p', 'empty', 'Pídeme que agende un evento, cree una tarea o guarde una nota. Toca el micrófono para hablarme.'));
 render();

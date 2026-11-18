@@ -9,7 +9,13 @@ const TOOLS = [
     titulo: { type: 'string' },
     fecha: { type: 'string', description: 'YYYY-MM-DD' },
     hora: { type: 'string', description: 'HH:MM en 24 h, opcional' },
+    avisar_minutos_antes: { type: 'integer', description: 'Minutos antes para avisar; por defecto 15' },
   }, ['titulo', 'fecha']),
+  fn('crear_recordatorio', 'Programa un recordatorio que sonará a esa fecha y hora.', {
+    texto: { type: 'string' },
+    fecha: { type: 'string', description: 'YYYY-MM-DD' },
+    hora: { type: 'string', description: 'HH:MM en 24 h' },
+  }, ['texto', 'fecha', 'hora']),
   fn('crear_tarea', 'Crea una tarea pendiente.', {
     titulo: { type: 'string' },
     fecha_limite: { type: 'string', description: 'YYYY-MM-DD, opcional' },
@@ -27,6 +33,13 @@ const TOOLS = [
 // Puedes cambiar el modelo sin tocar el código: variable GROQ_MODEL en Vercel.
 const MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
 
+// Solo los últimos mensajes: menos tokens por minuto (el plan gratis tiene tope).
+function recent(msgs) {
+  const out = msgs.slice(-12);
+  while (out.length && out[0].role !== 'user') out.shift();
+  return out;
+}
+
 module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Método no permitido' });
   if (!process.env.GROQ_API_KEY) return res.status(500).json({ error: 'Falta GROQ_API_KEY en Vercel' });
@@ -38,7 +51,7 @@ module.exports = async (req, res) => {
       'Eres Destiny, asistente personal. Responde en español, breve y cálido. ' +
       'Para agendar eventos, crear tareas o notas, usa siempre las herramientas; no finjas haberlo hecho. ' +
       'Convierte fechas relativas ("mañana", "el viernes") a YYYY-MM-DD usando la fecha actual del usuario: ' + ahora + '. ' +
-      'Si piden un PDF, usa generar_pdf. ' +
+      'Si piden un PDF, usa generar_pdf. Si piden que les recuerdes algo, usa crear_recordatorio y pregunta la hora si no la dieron. ' +
       'Si falta un dato imprescindible (por ejemplo, el día), pregúntalo en una sola frase.',
   };
 
@@ -48,16 +61,22 @@ module.exports = async (req, res) => {
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + process.env.GROQ_API_KEY },
       body: JSON.stringify({
         model: MODEL,
-        messages: [system, ...messages.slice(-40)],
+        messages: [system, ...recent(messages)],
         tools: TOOLS,
         tool_choice: 'auto',
         temperature: 0.3,
+        max_completion_tokens: 800,
+        ...(/gpt-oss/.test(MODEL) ? { reasoning_effort: 'low' } : {}),
       }),
     });
     const data = await r.json();
     if (!r.ok) {
       let msg = (data.error && data.error.message) || 'Error de Groq';
-      if (/model/i.test(msg)) {
+      if (r.status === 429) {
+        const m = /try again in ([\d.]+)s/i.exec(msg);
+        return res.status(429).json({ error: 'Llegué al límite gratuito de Groq por minuto. Espera ' + (m ? Math.ceil(m[1]) + ' segundos' : 'unos segundos') + ' y vuelve a intentarlo.' });
+      }
+      if (/does not exist|do not have access|model_not_found/i.test(msg)) {
         try {
           const l = await (await fetch('https://api.groq.com/openai/v1/models', { headers: { Authorization: 'Bearer ' + process.env.GROQ_API_KEY } })).json();
           msg += ' Modelos disponibles para tu clave: ' + l.data.map(m => m.id).join(', ') + '. Pon uno en GROQ_MODEL.';
