@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2e1a47">
+<title>Destiny</title>
+<style>
+:root{--bg:#f5f1fc;--card:#fff;--ink:#1e1530;--mute:#6b5d85;--violet:#7b4fd6;--on:#fff;--lav:#e4d9f8;--line:#d9cdef}
+@media(prefers-color-scheme:dark){:root{--bg:#171021;--card:#241a35;--ink:#f1eafc;--mute:#a999c7;--violet:#a98bf0;--on:#1e1530;--lav:#33264a;--line:#3d2e57}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--ink);display:grid;grid-template-columns:minmax(0,1fr) 360px;height:100dvh;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+main,aside{display:flex;flex-direction:column;min-height:0;min-width:0}
+main{padding:16px 20px 12px}
+h1{margin:0 0 12px;font-size:1.5rem;letter-spacing:-.01em}
+#log{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:4px 2px 12px}
+.m{max-width:85%;padding:10px 14px;border-radius:16px;white-space:pre-wrap;overflow-wrap:anywhere}
+.u{align-self:flex-end;background:var(--violet);color:var(--on);border-bottom-right-radius:4px}
+.a{align-self:flex-start;background:var(--card);border:1px solid var(--line);border-bottom-left-radius:4px}
+.a.err{border-color:#c0392b}
+.empty{color:var(--mute);margin:auto;text-align:center;max-width:32ch}
+form{display:flex;gap:8px}
+input{flex:1;min-width:0;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink);font:inherit}
+button{font:inherit;cursor:pointer}
+form button{padding:0 18px;border:0;border-radius:12px;background:var(--violet);color:var(--on);font-weight:600}
+form button:disabled{opacity:.5}
+:focus-visible{outline:3px solid var(--violet);outline-offset:2px}
+aside{background:var(--card);border-left:1px solid var(--line);padding:16px;overflow-y:auto}
+h2{font-size:1rem;margin:16px 0 6px}
+h2:first-child{margin-top:0}
+ul{list-style:none;margin:0;padding:0}
+li{display:flex;gap:8px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--line)}
+li span{flex:1;overflow-wrap:anywhere}
+li small{display:block;color:var(--mute)}
+li button{border:0;background:none;color:var(--mute);padding:2px 6px;border-radius:6px}
+li.done span{text-decoration:line-through;color:var(--mute)}
+.none{color:var(--mute);font-size:.9rem;padding:4px 0}
+header{display:flex;align-items:center;gap:14px;margin-bottom:12px}
+header h1{margin:0;flex:1}
+.orb{--s:1;position:relative;width:56px;height:56px;border-radius:50%;flex:0 0 auto;background:radial-gradient(circle at 35% 30%,#e4d9f8,#a98bf0 45%,#5b2fb3);transform:scale(var(--s));transition:transform .12s ease-out,box-shadow .2s}
+.orb::before,.orb::after{content:"";position:absolute;top:40%;width:7px;height:10px;border-radius:50%;background:#2e1a47}
+.orb::before{left:30%}.orb::after{right:30%}
+.orb[data-st=listening]{animation:ring 1.2s infinite}
+.orb[data-st=speaking]{box-shadow:0 0 22px 6px rgba(169,139,240,.55)}
+@keyframes ring{0%{box-shadow:0 0 0 0 rgba(123,79,214,.55)}70%,100%{box-shadow:0 0 0 16px rgba(123,79,214,0)}}
+@media(prefers-reduced-motion:reduce){.orb{transition:none}.orb[data-st=listening]{animation:none;box-shadow:0 0 0 6px rgba(123,79,214,.45)}}
+.tg{border:1px solid var(--line);background:var(--card);color:var(--ink);padding:6px 12px;border-radius:999px}
+.tg[aria-pressed=false]{color:var(--mute)}
+#mic{width:48px;padding:0;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink)}
+#mic[aria-pressed=true]{background:var(--violet);color:var(--on)}
+#tabs{display:none}
+@media(max-width:800px){
+ body{grid-template-columns:1fr;grid-template-rows:1fr auto}
+ aside{border-left:0}
+ body[data-v=chat] aside,body[data-v=panel] main{display:none}
+ #tabs{display:flex;border-top:1px solid var(--line);background:var(--card)}
+ #tabs button{flex:1;padding:12px;border:0;background:none;color:var(--mute)}
+ #tabs button[aria-pressed=true]{color:var(--violet);font-weight:700}
+}
+@media(prefers-reduced-motion:no-preference){.m{animation:in .15s ease-out}@keyframes in{from{opacity:0;transform:translateY(4px)}}}
+</style>
+</head>
+<body data-v="chat">
+<main>
+  <header>
+    <div class="orb" id="orb" data-st="idle" role="img" aria-label="Avatar de Destiny"></div>
+    <h1>Destiny</h1>
+    <button type="button" class="tg" id="vz" aria-pressed="true">Voz activada</button>
+  </header>
+  <div id="log" aria-live="polite"></div>
+  <form id="f">
+    <input id="q" placeholder="Agéndame dentista el viernes a las 4" autocomplete="off" aria-label="Mensaje">
+    <button type="button" id="mic" aria-pressed="false" aria-label="Hablar" title="Hablar">🎤</button>
+    <button id="s">Enviar</button>
+  </form>
+</main>
+<aside id="panel"></aside>
+<nav id="tabs">
+  <button data-v="chat" aria-pressed="true">Chat</button>
+  <button data-v="panel" aria-pressed="false">Agenda</button>
+</nav>
+<script>
+const KEY = 'destiny-data';
+const blank = () => ({ eventos: [], tareas: [], notas: [] });
+let db;
+try { db = JSON.parse(localStorage.getItem(KEY)) || blank(); } catch { db = blank(); }
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch {} };
+const uid = () => Math.random().toString(36).slice(2, 9);
+
+const tools = {
+  crear_evento: a => { db.eventos.push({ id: uid(), titulo: a.titulo, fecha: a.fecha, hora: a.hora || '' }); return 'Evento creado'; },
+  crear_tarea: a => { db.tareas.push({ id: uid(), titulo: a.titulo, fecha: a.fecha_limite || '', hecha: false }); return 'Tarea creada'; },
+  crear_nota: a => { db.notas.push({ id: uid(), titulo: a.titulo, texto: a.texto || '' }); return 'Nota creada'; },
+  ver_agenda: () => JSON.stringify(db),
+};
+
+const $ = s => document.querySelector(s);
+const log = $('#log'), panel = $('#panel');
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+
+function bubble(text, cls) {
+  const e = log.querySelector('.empty'); if (e) e.remove();
+  const b = el('div', 'm ' + cls, text); log.append(b); log.scrollTop = log.scrollHeight; return b;
+}
+
+function section(title, key, items, line) {
+  panel.append(el('h2', '', title));
+  if (!items.length) { panel.append(el('div', 'none', 'Todavía no hay nada.')); return; }
+  const ul = el('ul');
+  items.forEach(it => {
+    const li = el('li', it.hecha ? 'done' : '');
+    if (key === 'tareas') {
+      const c = el('input'); c.type = 'checkbox'; c.checked = !!it.hecha; c.style.flex = '0 0 auto';
+      c.setAttribute('aria-label', 'Marcar tarea como hecha');
+      c.onchange = () => { it.hecha = c.checked; save(); render(); };
+      li.append(c);
+    }
+    const s = el('span', '', it.titulo); const [sub] = [line(it)];
+    if (sub) s.append(el('small', '', sub));
+    const x = el('button', '', 'Borrar'); x.onclick = () => { db[key] = db[key].filter(o => o.id !== it.id); save(); render(); };
+    li.append(s, x); ul.append(li);
+  });
+  panel.append(ul);
+}
+
+function render() {
+  panel.replaceChildren();
+  const byDate = (a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora);
+  section('Eventos', 'eventos', [...db.eventos].sort(byDate), e => e.fecha + (e.hora ? ' · ' + e.hora : ''));
+  section('Tareas', 'tareas', db.tareas, t => t.fecha ? 'Para el ' + t.fecha : '');
+  section('Notas', 'notas', db.notas, n => n.texto);
+}
+
+const hist = [];
+async function ask() {
+  for (let i = 0; i < 4; i++) {
+    const r = await fetch('/api/chat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: hist, ahora: new Date().toString() }),
+    });
+    const raw = await r.text();
+    let data = {};
+    try { data = JSON.parse(raw); } catch {}
+    if (!r.ok || !data.message) throw new Error(data.error || (r.status === 404 || r.status === 405 || !raw
+      ? 'No encontré el servidor (/api/chat). Con Live Server no funciona: usa "vercel dev" o la página ya subida a Vercel.'
+      : 'Respuesta inesperada del servidor (' + r.status + ')'));
+    hist.push(data.message);
+    if (!data.message.tool_calls) return data.message.content;
+    for (const c of data.message.tool_calls) {
+      let out;
+      try { out = tools[c.function.name](JSON.parse(c.function.arguments || '{}')); }
+      catch (e) { out = 'Error: ' + e.message; }
+      hist.push({ role: 'tool', tool_call_id: c.id, content: String(out) });
+    }
+    save(); render();
+  }
+  return 'Listo.';
+}
+
+$('#f').onsubmit = async ev => {
+  ev.preventDefault();
+  const q = $('#q'), text = q.value.trim(); if (!text) return;
+  q.value = ''; $('#s').disabled = true;
+  if (voiceOn && 'speechSynthesis' in window) { speechSynthesis.cancel(); speechSynthesis.speak(new SpeechSynthesisUtterance('')); }
+  bubble(text, 'u'); hist.push({ role: 'user', content: text });
+  const wait = bubble('Pensando…', 'a');
+  try { wait.textContent = (await ask()) || 'Hecho.'; speak(wait.textContent); }
+  catch (e) { wait.textContent = 'No pude responder: ' + e.message; wait.classList.add('err'); }
+  $('#s').disabled = false; q.focus(); log.scrollTop = log.scrollHeight;
+};
+
+document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
+  document.body.dataset.v = b.dataset.v;
+  document.querySelectorAll('#tabs button').forEach(x => x.setAttribute('aria-pressed', x === b));
+});
+
+// ---- Voz y avatar ----
+const orb = $('#orb'), vz = $('#vz'), mic = $('#mic');
+const setSt = s => { orb.dataset.st = s; };
+const lang = navigator.language.startsWith('es') ? navigator.language : 'es-ES';
+let voiceOn = true, voice = null;
+const hasTTS = 'speechSynthesis' in window;
+function pickVoice() {
+  const vs = speechSynthesis.getVoices();
+  voice = vs.find(v => v.lang === lang) || vs.find(v => v.lang.startsWith('es')) || null;
+}
+if (hasTTS) { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
+function speak(text) {
+  if (!voiceOn || !hasTTS) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text.replace(/[*_#`>]/g, ''));
+  u.lang = lang; if (voice) u.voice = voice;
+  const calm = () => orb.style.setProperty('--s', 1);
+  u.onstart = () => setSt('speaking');
+  u.onboundary = () => { orb.style.setProperty('--s', 1 + Math.random() * .12); setTimeout(calm, 90); };
+  u.onend = u.onerror = () => { calm(); setSt('idle'); };
+  speechSynthesis.speak(u);
+}
+vz.onclick = () => {
+  voiceOn = !voiceOn;
+  vz.setAttribute('aria-pressed', voiceOn);
+  vz.textContent = voiceOn ? 'Voz activada' : 'Voz apagada';
+  if (!voiceOn && hasTTS) { speechSynthesis.cancel(); setSt('idle'); }
+};
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!SR) { mic.hidden = true; } else {
+  const rec = new SR(); let on = false;
+  rec.lang = lang; rec.interimResults = false; rec.continuous = false;
+  rec.onstart = () => { on = true; mic.setAttribute('aria-pressed', true); setSt('listening'); };
+  rec.onend = () => { on = false; mic.setAttribute('aria-pressed', false); if (orb.dataset.st === 'listening') setSt('idle'); };
+  rec.onerror = e => bubble(
+    e.error === 'not-allowed' ? 'Permite el micrófono en el navegador para poder hablarte.' :
+    e.error === 'network' ? 'El reconocimiento de voz necesita internet.' :
+    'No te escuché bien. Toca el micrófono e inténtalo de nuevo.', 'a err');
+  rec.onresult = e => { $('#q').value = e.results[0][0].transcript; $('#f').requestSubmit(); };
+  mic.onclick = () => { if (on) return rec.stop(); if (hasTTS) speechSynthesis.cancel(); rec.start(); };
+}
+
+log.append(el('p', 'empty', 'Pídeme que agende un evento, cree una tarea o guarde una nota. Toca el micrófono para hablarme.'));
+render();
+</script>
+</body>
+</html>
